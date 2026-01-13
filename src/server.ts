@@ -4,6 +4,7 @@ import multer from "multer";
 import path from "path";
 import dotenv from "dotenv";
 import { SftpService } from "./sftp.service";
+import fs from "fs";
 
 dotenv.config();
 
@@ -36,39 +37,46 @@ app.post(
   "/upload",
   upload.single("file"),
   async (req: MulterRequest, res: Response) => {
-    if (!req.file) {
-      return res.status(400).json({ error: "File is required" });
+    const sftp = new SftpService();
+    let tempFilePath = null;
+
+    try {
+      if (!req.file) {
+        return res.status(400).json({ error: "File is required" });
+      }
+
+      await sftp.connect();
+
+      const localFilePath = req.file.path;
+      const originalFileName = req.file.originalname;
+      const remoteFilePath = path.posix.join("/incoming", originalFileName);
+
+      await sftp.upload(localFilePath, remoteFilePath);
+
+      res.json({
+        success: true,
+        message: "File uploaded to SFTP server successfully",
+        filename: originalFileName,
+        remotePath: remoteFilePath,
+      });
+    } catch (e) {
+      console.error("SFTP upload error:", e);
+      res.status(500).json({
+        success: false,
+        error: "Failed to upload file to SFTP server",
+      });
+    } finally {
+      if (sftp) {
+        await sftp.disconnect();
+      }
+      if (tempFilePath) {
+        try {
+          fs.unlink(tempFilePath, () => {});
+        } catch (err) {
+          console.error("Error deleting temp file:", err);
+        }
+      }
     }
-
-    const localFilePath = req.file.path;
-    const remoteFilePath = path.posix.join(
-      "/remote/path",
-      req.file.originalname
-    );
-
-    // try {
-    //   await sftp.connect({
-    //     host: process.env.SFTP_HOST as string,
-    //     port: Number(process.env.SFTP_PORT) || 22,
-    //     username: process.env.SFTP_USER as string,
-    //     password: process.env.SFTP_PASSWORD,
-    //     // privateKey: fs.readFileSync(process.env.SFTP_PRIVATE_KEY_PATH!)
-    //   });
-
-    //   await sftp.put(localFilePath, remoteFilePath);
-
-    //   return res.json({
-    //     message: "File uploaded successfully",
-    //     file: req.file.originalname,
-    //   });
-    // } catch (e) {
-    //   console.error("SFTP upload error:", e);
-    //   return res.status(500).json({ error: "SFTP upload failed" });
-    // } finally {
-    //   fs.unlink(localFilePath, () => {});
-    //   sftp.end();
-    // }
-    res.send({ localFilePath, remoteFilePath });
   }
 );
 
